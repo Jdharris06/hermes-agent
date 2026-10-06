@@ -112,9 +112,23 @@ def normalize_model_name(model: str, preserve_dots: bool = False) -> str:
     return model
 
 
+_TOOL_ID_ESCAPE_PREFIX = "hermes_id_"
+_ANTHROPIC_TOOL_ID_RE = re.compile(r"[a-zA-Z0-9_-]+")
+
+
 def _sanitize_tool_id(tool_id: str) -> str:
-    """Anthropic requires ids matching [a-zA-Z0-9_-]; replace the rest, never empty."""
-    return (re.sub(r"[^a-zA-Z0-9_-]", "_", tool_id) if tool_id else "") or "tool_0"
+    """Map a foreign tool-call id injectively into Anthropic's ``[a-zA-Z0-9_-]`` alphabet.
+
+    Ids that are already valid pass through unchanged. Anything else (other characters, empty)
+    is hex-encoded under a reserved ``hermes_id_`` prefix; a *valid* id that happens to start
+    with that prefix is encoded too, so an encoded id can never equal a literal one. Replacing
+    invalid characters with ``_`` is not injective: ``call.a`` and ``call/a`` both became
+    ``call_a`` and a ``tool_result`` could pair with the wrong ``tool_use``. The call and result
+    sides both route through this one function, so pairs stay matched."""
+    tool_id = tool_id or ""
+    if _ANTHROPIC_TOOL_ID_RE.fullmatch(tool_id) and not tool_id.startswith(_TOOL_ID_ESCAPE_PREFIX):
+        return tool_id
+    return _TOOL_ID_ESCAPE_PREFIX + tool_id.encode("utf-8", errors="surrogatepass").hex()
 
 
 def _tool_use_block(tool_id: Any, name: Any, tool_input: Any) -> Dict[str, Any]:

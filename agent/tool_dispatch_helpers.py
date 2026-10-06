@@ -469,7 +469,7 @@ _UNTRUSTED_TOOL_PREFIXES = ("browser_", "mcp_")
 _UNTRUSTED_WRAP_MIN_CHARS = 32
 
 # Case-insensitive so a differently-cased tag can't forge or prematurely close the boundary.
-_DELIMITER_TOKEN_RE = re.compile(r"untrusted_tool_result", re.IGNORECASE)
+_DELIMITER_TOKEN_RE = re.compile(r"(<\s*/?\s*)untrusted_tool_result(?=[\s/>]|$)", re.IGNORECASE)
 
 
 def _is_untrusted_tool(name: Optional[str]) -> bool:
@@ -539,8 +539,13 @@ def _tool_output_risk_metadata(name: str, content: Any) -> Optional[Dict[str, An
 
 def _neutralize_delimiters(content: str) -> str:
     """Defang embedded ``untrusted_tool_result`` tokens so poisoned content can't close the
-    trust boundary early (hyphens keep it readable but non-matching)."""
-    return _DELIMITER_TOKEN_RE.sub("untrusted-tool-result", content)
+    trust boundary early (hyphens keep it readable but non-matching).
+
+    Only a *tag* can close the wrapper (``</untrusted_tool_result>``, ``<untrusted_tool_result``,
+    ``< / UNTRUSTED_TOOL_RESULT >``), so only tag contexts are rewritten. The bare word inside a
+    URL path, a file name, or a code identifier is data the model may need to quote back exactly
+    (a link, a path to open); renaming it there corrupts the identifier without closing anything."""
+    return _DELIMITER_TOKEN_RE.sub(r"\1untrusted-tool-result", content)
 
 
 def _maybe_wrap_untrusted(name: str, content: Any) -> Any:

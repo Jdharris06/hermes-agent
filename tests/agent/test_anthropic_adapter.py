@@ -678,6 +678,32 @@ class TestConvertTools:
 
 class TestConvertMessages:
 
+    def test_foreign_tool_ids_map_injectively_and_pairs_stay_matched(self):
+        """Non-Anthropic ids (dots, slashes, unicode, empty) must not collapse onto each
+        other: ``call.a`` and ``call/a`` both used to become ``call_a``, so a tool_result could
+        pair with the wrong tool_use. Valid ids pass through; the rest are hex-encoded under a
+        reserved prefix, and a literal id inside that prefix is encoded too (no collision)."""
+        import copy
+        import re
+        from agent.anthropic_message_convert import _sanitize_tool_id
+
+        ids = ["call.a", "call/a", "call_a", "", "tool_0", "hermes_id_", "hermes_id_63616c6c2e61", "调用.1"]
+        converted = [_sanitize_tool_id(value) for value in ids]
+        assert len(set(converted)) == len(ids)
+        assert all(re.fullmatch(r"[a-zA-Z0-9_-]+", value) for value in converted)
+        assert _sanitize_tool_id("call_normal-1") == "call_normal-1"
+
+        history = [{"role": "assistant", "content": "", "tool_calls": [
+            {"id": value, "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+            for value in ids[:3]]}]
+        history.extend({"role": "tool", "tool_call_id": value, "content": value} for value in ids[:3])
+        original = copy.deepcopy(history)
+        _, messages = convert_messages_to_anthropic(history)
+        uses = [b["id"] for m in messages for b in m["content"] if b["type"] == "tool_use"]
+        results = [b["tool_use_id"] for m in messages for b in m["content"] if b["type"] == "tool_result"]
+        assert uses == results == converted[:3]
+        assert history == original
+
 
     def test_strips_tool_use_when_result_not_immediately_adjacent(self):
         """A tool_use whose result appears LATER but not in the immediately
